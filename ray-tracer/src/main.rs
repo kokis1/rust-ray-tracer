@@ -9,8 +9,9 @@ mod materials;
 
 
 use std::io;
-use std::rc::Rc;
+use std::sync::Arc;
 
+use rayon::prelude::*;
 use ray::Ray;
 use vec3::{Colour, Point3, Vec3, write_colour, unit_vector, dot};
 use hitable::{HitRecord, Hittable};
@@ -64,7 +65,7 @@ fn hit_sphere(centre: Point3, radius: f64, r: &Ray) -> f64 {
 fn random_scene() -> HittableList {
     let mut world = HittableList::new();
  
-    let ground_material = Rc::new(Lambertian::new(Colour::new(0.5, 0.5, 0.5)));
+    let ground_material = Arc::new(Lambertian::new(Colour::new(0.5, 0.5, 0.5)));
     world.add(Box::new(Sphere::new(
         Point3::new(0.0, -1000.0, 0.0),
         1000.0,
@@ -84,38 +85,38 @@ fn random_scene() -> HittableList {
                 if choose_mat < 0.8 {
                     // Diffuse
                     let albedo = Colour::random() * Colour::random();
-                    let sphere_material = Rc::new(Lambertian::new(albedo));
+                    let sphere_material = Arc::new(Lambertian::new(albedo));
                     world.add(Box::new(Sphere::new(center, 0.2, sphere_material)));
                 } else if choose_mat < 0.95 {
                     // Metal
                     let albedo = Colour::random_range(0.5, 1.0);
                     let fuzz = common::random_f64_range(0.0, 0.5);
-                    let sphere_material = Rc::new(Metal::new(albedo, fuzz));
+                    let sphere_material = Arc::new(Metal::new(albedo, fuzz));
                     world.add(Box::new(Sphere::new(center, 0.2, sphere_material)));
                 } else {
                     // Glass
-                    let sphere_material = Rc::new(Dialectric::new(1.5));
+                    let sphere_material = Arc::new(Dialectric::new(1.5));
                     world.add(Box::new(Sphere::new(center, 0.2, sphere_material)));
                 }
             }
         }
     }
  
-    let material1 = Rc::new(Dialectric::new(1.5));
+    let material1 = Arc::new(Dialectric::new(1.5));
     world.add(Box::new(Sphere::new(
         Point3::new(0.0, 1.0, 0.0),
         1.0,
         material1,
     )));
  
-    let material2 = Rc::new(Lambertian::new(Colour::new(0.4, 0.2, 0.1)));
+    let material2 = Arc::new(Lambertian::new(Colour::new(0.4, 0.2, 0.1)));
     world.add(Box::new(Sphere::new(
         Point3::new(-4.0, 1.0, 0.0),
         1.0,
         material2,
     )));
  
-    let material3 = Rc::new(Metal::new(Colour::new(0.7, 0.6, 0.5), 0.0));
+    let material3 = Arc::new(Metal::new(Colour::new(0.7, 0.6, 0.5), 0.0));
     world.add(Box::new(Sphere::new(
         Point3::new(4.0, 1.0, 0.0),
         1.0,
@@ -129,10 +130,10 @@ fn main() {
     // Image
  
     const ASPECT_RATIO: f64 = 3.0 / 2.0;
-    const IMAGE_WIDTH: i32 = 256;
+    const IMAGE_WIDTH: i32 = 1200;
     const IMAGE_HEIGHT: i32 = (IMAGE_WIDTH as f64 / ASPECT_RATIO) as i32;
-    const SAMPLES_PER_PIXEL: i32 = 100;
-    const MAX_DEPTH: i32 = 25;
+    const SAMPLES_PER_PIXEL: i32 = 500;
+    const MAX_DEPTH: i32 = 50;
  
     // World
  
@@ -161,14 +162,20 @@ fn main() {
     print!("P3\n{} {}\n255\n", IMAGE_WIDTH, IMAGE_HEIGHT);
 
     for j in (0..IMAGE_HEIGHT).rev() {
-        for i in 0..IMAGE_WIDTH {
-            let mut pixel_colour = Colour::new(0.0, 0.0, 0.0);
-            for _ in 0..SAMPLES_PER_PIXEL {
-                let u = (i as f64 + common::random_f64()) / (IMAGE_WIDTH - 1) as f64;
-                let v = (j as f64 + common::random_f64()) / (IMAGE_HEIGHT - 1) as f64;
-                let r = cam.get_ray(u, v);
-                pixel_colour += ray_colour(&r, &world, MAX_DEPTH);
-            }
+        let pixel_colours: Vec<_> = (0..IMAGE_WIDTH)
+            .into_par_iter()
+            .map(|i| {
+                let mut pixel_colour = Colour::new(0.0, 0.0, 0.0);
+                for _ in 0..SAMPLES_PER_PIXEL {
+                    let u = ((i as f64) + common::random_f64()) / (IMAGE_WIDTH - 1) as f64;
+                    let v = ((j as f64) + common::random_f64()) / (IMAGE_HEIGHT - 1) as f64;
+                    let r = cam.get_ray(u, v);
+                    pixel_colour += ray_colour(&r, &world, MAX_DEPTH);
+                }
+                pixel_colour
+            })
+            .collect();
+        for pixel_colour in pixel_colours {
             write_colour(&mut io::stdout(), pixel_colour, SAMPLES_PER_PIXEL);
         }
     }
